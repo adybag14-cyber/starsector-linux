@@ -43,7 +43,7 @@
 	"undecoratedWindow":false,
 	"alwaysUndecoratedAtFullscreen":true,
 	"enableSoundFilters":true,
-	"resolutionOverride":"1280x768",
+	#"resolutionOverride":"1024x768",
 	#"refreshRateOverride":60,
 	#"forceAspectRatio":"1.3333",
 	#"windowLocationX":0,
@@ -2259,6 +2259,5 @@
 		},		
 	}
 }
-
 
 
