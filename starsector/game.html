@@ -44,6 +44,22 @@
             layer: document.getElementById('ui-layer')
         };
 
+        function scheduleThreadDump(delayMs, label) {
+            return setTimeout(async () => {
+                console.info(`Boot: ${label}`, { time: performance.now() });
+                if (typeof window.dumpAllThreads !== "function") {
+                    console.warn("Boot: dumpAllThreads not available");
+                    return;
+                }
+                try {
+                    const result = await window.dumpAllThreads();
+                    console.info(`Boot: thread dump (${label})`, result);
+                } catch (e) {
+                    console.warn("Boot: dumpAllThreads failed", e);
+                }
+            }, delayMs);
+        }
+
         // --- 1. THROTTLED PREFETCHER (Fixes Browser Freeze) ---
         async function prefetch() {
             ui.log.innerText = "Loading Manifest...";
@@ -215,9 +231,8 @@
 
                 document.getElementById('ui-layer').style.display = 'none';
                 console.info("Boot: launching StarfarerLauncher", { time: performance.now() });
-                setTimeout(() => {
-                    console.info("Boot: launcher still running after 30s", { time: performance.now() });
-                }, 30000);
+                scheduleThreadDump(30000, "launcher still running after 30s");
+                scheduleThreadDump(60000, "launcher still running after 60s");
                 await cheerpjRunMain("com.fs.starfarer.StarfarerLauncher", classpath);
                 console.info("Boot: launcher exited", { time: performance.now() });
 
