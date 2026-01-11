@@ -44,10 +44,6 @@
             layer: document.getElementById('ui-layer')
         };
 
-        // --- 0. OVERCLOCK PATCH (AI OPTIMIZATION) ---
-        // Force the engine to run faster than 60Hz by bypassing the browser's VSync
-        window.requestAnimationFrame = (callback) => setTimeout(callback, 0);
-
         // --- 1. THROTTLED PREFETCHER (Fixes Browser Freeze) ---
         async function prefetch() {
             ui.log.innerText = "Loading Manifest...";
@@ -56,9 +52,9 @@
             const TOTAL = assets.length;
             let loaded = 0;
             
-            // Matches Report: Reduced concurrency to 2
-            const WORKERS = 2;
-            const DELAY_MS = 10; 
+            // Adaptive concurrency to speed up cache priming without overwhelming the UI thread.
+            const WORKERS = Math.min(6, navigator.hardwareConcurrency || 4);
+            const DELAY_MS = 5; 
 
             ui.log.innerText = `Queueing ${TOTAL} files...`;
             const queue = [...assets];
@@ -68,12 +64,14 @@
                     const file = queue.shift();
                     try {
                         // Fetch and Blob to force storage in browser cache
+                        console.info("Prefetching", file);
                         await fetch(file).then(r => r.blob());
                         loaded++;
                         
                         if (loaded % 10 === 0) {
                             ui.bar.style.width = (loaded / TOTAL * 100) + "%";
                             ui.log.innerText = `Cached: ${loaded} / ${TOTAL}`;
+                            console.info("Prefetch progress", loaded, TOTAL);
                         }
                         // Yield to UI thread
                         await new Promise(r => setTimeout(r, DELAY_MS));
@@ -83,6 +81,9 @@
 
             const threads = Array(WORKERS).fill(null).map(() => worker());
             await Promise.all(threads);
+            ui.bar.style.width = "100%";
+            ui.log.innerText = `Cache complete: ${loaded} / ${TOTAL}`;
+            console.info("Prefetch complete", loaded, TOTAL);
         }
 
         // --- 2. ENGINE BOOT ---
@@ -95,6 +96,7 @@
             // B. Init JVM
             ui.log.innerText = "Initializing Java 17 (Local Runtime)...";
             const ROOT = window.location.origin + "/";
+            console.info("Boot: starting cheerpjInit", { root: ROOT, time: performance.now() });
 
             try {
                 await cheerpjInit({
@@ -109,6 +111,7 @@
                     runtime: { version: "17", url: "/17/lib/modules" },
                     javaProperties: [
                         "java.version=17", "os.name=Linux",
+                        "file.encoding=UTF-8",
                         "user.dir=/app", "user.home=/app/saves",
                         
                         // Native Path Fix
@@ -116,40 +119,107 @@
                         "org.lwjgl.librarypath=/app/native/linux:/app/native",
 
                         // Path Redirects
-                        "-Dcom.fs.starfarer.settings.paths.mods=/app/mods",
-                        "-Dcom.fs.starfarer.settings.paths.saves=/app/saves",
-                        "-Dcom.fs.starfarer.settings.paths.logs=/app/logs",
-                        "-Dfs.game.dir=/app",
+                        "com.fs.starfarer.settings.paths.mods=/app/mods",
+                        "com.fs.starfarer.settings.paths.saves=/app/saves",
+                        "com.fs.starfarer.settings.paths.screenshots=/app/screenshots",
+                        "com.fs.starfarer.settings.paths.logs=/app/logs",
+                        "fs.game.dir=/app",
+                        "com.fs.starfarer.settings.linux=true",
+                        "java.util.Arrays.useLegacyMergeSort=true",
+                        "log4j.configuration=file:/app/console_log4j.properties",
                         
                         "legacyLauncher=true", "log4j.debug=true", "java.awt.headless=false"
                     ],
                     arguments: [
+                        "--enable-preview",
                         "--add-opens=java.base/java.lang=ALL-UNNAMED",
                         "--add-opens=java.base/java.util=ALL-UNNAMED",
                         "--add-opens=java.base/java.nio=ALL-UNNAMED", 
+                        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+                        "--add-opens=java.base/java.nio.Buffer.UNSAFE=ALL-UNNAMED",
+                        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+                        "--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED",
+                        "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
+                        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+                        "--add-opens=java.base/java.lang.ref=ALL-UNNAMED",
+                        "--add-opens=java.base/java.text=ALL-UNNAMED",
+                        "--add-opens=java.desktop/java.awt.font=ALL-UNNAMED",
+                        "--add-opens=java.desktop/java.awt.Rectangle=ALL-UNNAMED",
                         "--add-opens=java.desktop/java.awt=ALL-UNNAMED",
-                        "-Xmx1500m", "-Xms512m"
+                        "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+                        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+                        "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
+                        "-Xmx1500m", "-Xms512m", "-Xss4m"
                     ]
                 });
+                console.info("Boot: cheerpjInit completed", { time: performance.now() });
 
                 cheerpjCreateDisplay(1280, 768);
+                console.info("Boot: display created", { width: 1280, height: 768, time: performance.now() });
+
+                const createDir = (path) => new Promise((resolve) => {
+                    const mkdir = window.cheerpOSCreateDir || window.cheerpjCreateDir;
+                    if (!mkdir) {
+                        resolve();
+                        return;
+                    }
+                    try {
+                        mkdir(path, {}, 0o755, () => resolve());
+                    } catch (e) {
+                        resolve();
+                    }
+                });
+
+                await createDir("/app/saves");
+                await createDir("/app/logs");
+                await createDir("/app/mods");
+                await createDir("/app/screenshots");
+                console.info("Boot: directories ensured", { time: performance.now() });
 
                 // C. Launch
-                ui.log.innerText = "Executing CombatMain...";
+                ui.log.innerText = "Executing StarfarerLauncher...";
+                console.info("Boot: preparing classpath", { time: performance.now() });
                 
-                // Build Classpath dynamically from manifest (JARs only)
+                // Build classpath to match starsector.sh ordering.
                 const assets = await fetch('assets.json').then(r => r.json());
-                const classpath = assets
-                    .filter(f => f.endsWith('.jar'))
-                    .map(f => "/app/" + f)
-                    .join(":");
+                const classpathEntries = [
+                    "janino.jar",
+                    "commons-compiler.jar",
+                    "commons-compiler-jdk.jar",
+                    "starfarer.api.jar",
+                    "starfarer_obf.jar",
+                    "jogg-0.0.7.jar",
+                    "jorbis-0.0.15.jar",
+                    "json.jar",
+                    "lwjgl.jar",
+                    "jinput.jar",
+                    "log4j-1.2.9.jar",
+                    "lwjgl_util.jar",
+                    "fs.sound_obf.jar",
+                    "fs.common_obf.jar",
+                    "xstream-1.4.10.jar",
+                    "txw2-3.0.2.jar",
+                    "jaxb-api-2.4.0-b180830.0359.jar",
+                    "webp-imageio-0.1.6.jar"
+                ];
+                const missing = classpathEntries.filter((entry) => !assets.includes(entry));
+                if (missing.length) {
+                    console.warn("Missing classpath entries:", missing);
+                    ui.log.innerText = `Missing jars: ${missing.join(", ")}`;
+                }
+                const classpath = classpathEntries.map((entry) => "/app/" + entry).join(":");
 
                 // Auto-create log file to ensure write layer is active
                 const addFile = window.cheerpOSAddStringFile || window.cheerpjAddStringFile;
                 try { await addFile("/app/starsector.log", "Init"); } catch(e){}
 
                 document.getElementById('ui-layer').style.display = 'none';
-                await cheerpjRunMain("com.fs.starfarer.combat.CombatMain", classpath);
+                console.info("Boot: launching StarfarerLauncher", { time: performance.now() });
+                setTimeout(() => {
+                    console.info("Boot: launcher still running after 30s", { time: performance.now() });
+                }, 30000);
+                await cheerpjRunMain("com.fs.starfarer.StarfarerLauncher", classpath);
+                console.info("Boot: launcher exited", { time: performance.now() });
 
             } catch (e) {
                 ui.log.innerText = "FATAL: " + e.message;
@@ -160,4 +230,3 @@
     </script>
 </body>
 </html>
-
