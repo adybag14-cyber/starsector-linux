@@ -16,7 +16,7 @@
 	# can also be toggled on/off in code via DebugFlags.PRINT_RULES_DEBUG_INFO
 	"printRulesDebugInfo":false,
 	
-	"queryMaxAASamples":true,
+	"queryMaxAASamples":false,
 	"maxAASamples":16, # selectable value is limited by this
 	"aaSamplesOverride":-1, # >= 0 overrides value selected in launcher; required to use AA samples with legacyLauncher
 	"screenScaleOverride":0, # > 0 overrides UI scaling value from in-game settings 
@@ -79,7 +79,7 @@
 	"idleWhileWindowNotVisible":true,
 	"doNotIdleWhenUndecoratedFullcreen":true, # idling in an undecorated fullscreen window can cause issues with alt-tabbing
 	
-	"legacyLauncher":false,
+	"legacyLauncher":true,
 	"oneClickJumpPoints":false, # does not work do not set to true
 	"altMouseMoveToMassTransfer":true,
 	
@@ -2259,8 +2259,6 @@
 		},		
 	}
 }
-
-
 
 
 
