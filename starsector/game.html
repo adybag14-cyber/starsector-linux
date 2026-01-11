@@ -71,6 +71,13 @@
             threadDumpTimeouts.splice(0).forEach((handle) => clearTimeout(handle));
         }
 
+        function fetchWithTimeout(url, timeoutMs) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            return fetch(url, { signal: controller.signal })
+                .finally(() => clearTimeout(timeout));
+        }
+
         // --- 1. THROTTLED PREFETCHER (Fixes Browser Freeze) ---
         async function prefetch() {
             ui.log.innerText = "Loading Manifest...";
@@ -78,22 +85,40 @@
             
             const TOTAL = assets.length;
             let loaded = 0;
+            let inFlight = 0;
+            let lastProgressAt = performance.now();
             
             // Adaptive concurrency to speed up cache priming without overwhelming the UI thread.
             const WORKERS = Math.min(6, navigator.hardwareConcurrency || 4);
             const DELAY_MS = 5; 
+            const REQUEST_TIMEOUT_MS = 15000;
+            const WATCHDOG_INTERVAL_MS = 1000;
+            const STALL_WARNING_MS = 10000;
 
             ui.log.innerText = `Queueing ${TOTAL} files...`;
             const queue = [...assets];
+            const watchdog = setInterval(() => {
+                const now = performance.now();
+                if (now - lastProgressAt > STALL_WARNING_MS) {
+                    console.warn("Prefetch stall warning", {
+                        loaded,
+                        total: TOTAL,
+                        remaining: queue.length,
+                        inFlight
+                    });
+                    lastProgressAt = now;
+                }
+            }, WATCHDOG_INTERVAL_MS);
 
             async function worker() {
                 while (queue.length > 0) {
                     const file = queue.shift();
                     try {
                         // Fetch and Blob to force storage in browser cache
-                        console.info("Prefetching", file);
-                        await fetch(file).then(r => r.blob());
+                        inFlight++;
+                        await fetchWithTimeout(file, REQUEST_TIMEOUT_MS).then(r => r.blob());
                         loaded++;
+                        lastProgressAt = performance.now();
                         
                         if (loaded % 10 === 0) {
                             ui.bar.style.width = (loaded / TOTAL * 100) + "%";
@@ -102,12 +127,17 @@
                         }
                         // Yield to UI thread
                         await new Promise(r => setTimeout(r, DELAY_MS));
-                    } catch (e) { console.warn("Skip:", file); }
+                    } catch (e) {
+                        console.warn("Skip:", file, e);
+                    } finally {
+                        inFlight = Math.max(0, inFlight - 1);
+                    }
                 }
             }
 
             const threads = Array(WORKERS).fill(null).map(() => worker());
             await Promise.all(threads);
+            clearInterval(watchdog);
             ui.bar.style.width = "100%";
             ui.log.innerText = `Cache complete: ${loaded} / ${TOTAL}`;
             console.info("Prefetch complete", loaded, TOTAL);
