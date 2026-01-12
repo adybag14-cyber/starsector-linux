@@ -125,6 +125,7 @@
             logPhase("Debug: probing runtime assets...");
             const probes = [
                 { url: `${root}17/lib/modules`, label: "runtime modules" },
+                { url: `${root}8/jre/lib/rt.jar`, label: "legacy rt.jar" },
                 { url: `${root}starfarer_obf.jar`, label: "starfarer_obf.jar" },
                 { url: `${root}lwjgl.jar`, label: "lwjgl.jar" }
             ];
@@ -225,6 +226,7 @@
             const skipPrefetch = isTruthyParam(params.get("skipPrefetch"));
             const debugRanges = isTruthyParam(params.get("debugRanges"));
             const debugBoot = isTruthyParam(params.get("debugBoot"));
+            const debugJvm = isTruthyParam(params.get("debugJvm"));
             if (skipPrefetch) {
                 ui.bar.style.width = "100%";
                 ui.log.innerText = "Prefetch skipped.";
@@ -236,7 +238,13 @@
             // B. Init JVM
             const ROOT = window.location.origin + "/";
             logPhase("Initializing Java 17 (Local Runtime)...");
-            console.info("Boot: starting cheerpjInit", { root: ROOT, time: performance.now(), debugRanges, debugBoot });
+            console.info("Boot: starting cheerpjInit", {
+                root: ROOT,
+                time: performance.now(),
+                debugRanges,
+                debugBoot,
+                debugJvm
+            });
 
             try {
                 if (debugBoot) {
@@ -246,7 +254,14 @@
                         hardwareConcurrency: navigator.hardwareConcurrency,
                         deviceMemory: navigator.deviceMemory,
                         language: navigator.language,
-                        languages: navigator.languages
+                        languages: navigator.languages,
+                        memory: performance.memory
+                            ? {
+                                jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+                                totalJSHeapSize: performance.memory.totalJSHeapSize,
+                                usedJSHeapSize: performance.memory.usedJSHeapSize
+                            }
+                            : null
                     });
                 }
 
@@ -255,6 +270,36 @@
                 }
 
                 const cheerpjInitStart = performance.now();
+                const baseArguments = [
+                    "--enable-preview",
+                    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                    "--add-opens=java.base/java.util=ALL-UNNAMED",
+                    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+                    "--add-opens=java.base/java.nio.Buffer.UNSAFE=ALL-UNNAMED",
+                    "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+                    "--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED",
+                    "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
+                    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+                    "--add-opens=java.base/java.lang.ref=ALL-UNNAMED",
+                    "--add-opens=java.base/java.text=ALL-UNNAMED",
+                    "--add-opens=java.desktop/java.awt.font=ALL-UNNAMED",
+                    "--add-opens=java.desktop/java.awt.Rectangle=ALL-UNNAMED",
+                    "--add-opens=java.desktop/java.awt=ALL-UNNAMED",
+                    "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+                    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+                    "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
+                    "-Xmx1500m",
+                    "-Xms512m",
+                    "-Xss4m"
+                ];
+                if (debugJvm) {
+                    baseArguments.push("-Xlog:os+thread=info", "-Xlog:class+load=info");
+                }
+                if (debugBoot) {
+                    console.info("Boot: JVM arguments", baseArguments);
+                }
+
                 await cheerpjInit({
                     natives: { window: { lwjglCanvasElement: document.getElementById("display") } },
                     fileSystem: {
@@ -286,27 +331,7 @@
                         
                         "legacyLauncher=true", "log4j.debug=true", "java.awt.headless=false"
                     ],
-                    arguments: [
-                        "--enable-preview",
-                        "--add-opens=java.base/java.lang=ALL-UNNAMED",
-                        "--add-opens=java.base/java.util=ALL-UNNAMED",
-                        "--add-opens=java.base/java.nio=ALL-UNNAMED", 
-                        "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
-                        "--add-opens=java.base/java.nio.Buffer.UNSAFE=ALL-UNNAMED",
-                        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
-                        "--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED",
-                        "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
-                        "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
-                        "--add-opens=java.base/java.lang.ref=ALL-UNNAMED",
-                        "--add-opens=java.base/java.text=ALL-UNNAMED",
-                        "--add-opens=java.desktop/java.awt.font=ALL-UNNAMED",
-                        "--add-opens=java.desktop/java.awt.Rectangle=ALL-UNNAMED",
-                        "--add-opens=java.desktop/java.awt=ALL-UNNAMED",
-                        "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
-                        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
-                        "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
-                        "-Xmx1500m", "-Xms512m", "-Xss4m"
-                    ]
+                    arguments: baseArguments
                 });
                 console.info("Boot: cheerpjInit completed", { time: performance.now() });
                 logDuration("cheerpjInit duration", cheerpjInitStart);
