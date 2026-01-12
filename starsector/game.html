@@ -72,6 +72,28 @@
             return normalized === "8" ? "8" : "17";
         }
 
+        function parseMainClass(paramValue) {
+            if (!paramValue) {
+                return "com.fs.starfarer.StarfarerLauncher";
+            }
+            const normalized = paramValue.trim();
+            return normalized.length > 0 ? normalized : "com.fs.starfarer.StarfarerLauncher";
+        }
+
+        function startHeartbeat(intervalMs) {
+            return setInterval(() => {
+                console.info("Boot: heartbeat", {
+                    time: performance.now(),
+                    memory: performance.memory
+                        ? {
+                            totalJSHeapSize: performance.memory.totalJSHeapSize,
+                            usedJSHeapSize: performance.memory.usedJSHeapSize
+                        }
+                        : null
+                });
+            }, intervalMs);
+        }
+
         function scheduleThreadDump(delayMs, label) {
             return setTimeout(async () => {
                 console.info(`Boot: ${label}`, { time: performance.now() });
@@ -245,6 +267,8 @@
             const debugJvm = isTruthyParam(params.get("debugJvm"));
             const debugClasspath = isTruthyParam(params.get("debugClasspath"));
             const runtimeVersion = parseRuntimeVersion(params.get("runtime"));
+            const mainClass = parseMainClass(params.get("mainClass"));
+            const heartbeatEnabled = isTruthyParam(params.get("debugHeartbeat"));
             if (skipPrefetch) {
                 ui.bar.style.width = "100%";
                 ui.log.innerText = "Prefetch skipped.";
@@ -263,7 +287,9 @@
                 debugBoot,
                 debugJvm,
                 debugClasspath,
-                runtimeVersion
+                runtimeVersion,
+                mainClass,
+                heartbeatEnabled
             });
 
             try {
@@ -325,6 +351,7 @@
                     console.info("Boot: runtime config", { runtimeVersion, runtimeUrl });
                 }
 
+                const heartbeatHandle = heartbeatEnabled ? startHeartbeat(5000) : null;
                 await cheerpjInit({
                     natives: { window: { lwjglCanvasElement: document.getElementById("display") } },
                     fileSystem: {
@@ -431,7 +458,7 @@
                 try { await addFile("/app/starsector.log", "Init"); } catch(e){}
 
                 document.getElementById('ui-layer').style.display = 'none';
-                console.info("Boot: launching StarfarerLauncher", { time: performance.now() });
+                console.info("Boot: launching", { time: performance.now(), mainClass });
                 console.info("Boot: dumpAllThreads available", typeof window.dumpAllThreads);
                 [
                     { delay: 0, label: "launcher started" },
@@ -441,11 +468,14 @@
                 ].forEach(({ delay, label }) => queueThreadDump(delay, label));
                 try {
                     const runMainStart = performance.now();
-                    await cheerpjRunMain("com.fs.starfarer.StarfarerLauncher", classpath);
+                    await cheerpjRunMain(mainClass, classpath);
                     console.info("Boot: launcher exited", { time: performance.now() });
                     logDuration("launcher run duration", runMainStart);
                 } finally {
                     cancelThreadDumps();
+                    if (heartbeatHandle) {
+                        clearInterval(heartbeatHandle);
+                    }
                 }
 
             } catch (e) {
