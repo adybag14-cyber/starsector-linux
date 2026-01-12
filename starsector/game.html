@@ -56,11 +56,13 @@
             const TOTAL = assets.length;
             let loaded = 0;
             
-            // Matches Report: Reduced concurrency to 2
-            const WORKERS = 2;
-            const DELAY_MS = 10; 
+            const MAX_WORKERS = 12;
+            const WORKERS = Math.min(MAX_WORKERS, navigator.hardwareConcurrency || 8);
+            const UI_UPDATE_INTERVAL = 250;
+            const startTime = performance.now();
+            let lastUpdate = startTime;
 
-            ui.log.innerText = `Queueing ${TOTAL} files...`;
+            ui.log.innerText = `Queueing ${TOTAL} files with ${WORKERS} workers...`;
             const queue = [...assets];
 
             async function worker() {
@@ -70,13 +72,15 @@
                         // Fetch and Blob to force storage in browser cache
                         await fetch(file).then(r => r.blob());
                         loaded++;
-                        
-                        if (loaded % 10 === 0) {
+
+                        const now = performance.now();
+                        if (now - lastUpdate >= UI_UPDATE_INTERVAL || loaded === TOTAL) {
+                            const elapsedSeconds = Math.max((now - startTime) / 1000, 0.001);
+                            const rate = Math.round(loaded / elapsedSeconds);
                             ui.bar.style.width = (loaded / TOTAL * 100) + "%";
-                            ui.log.innerText = `Cached: ${loaded} / ${TOTAL}`;
+                            ui.log.innerText = `Cached: ${loaded} / ${TOTAL} (${rate}/s)`;
+                            lastUpdate = now;
                         }
-                        // Yield to UI thread
-                        await new Promise(r => setTimeout(r, DELAY_MS));
                     } catch (e) { console.warn("Skip:", file); }
                 }
             }
@@ -98,6 +102,7 @@
 
             try {
                 await cheerpjInit({
+                    version: 17,
                     natives: { window: { lwjglCanvasElement: document.getElementById("display") } },
                     fileSystem: {
                         mountPoint: "/app",
@@ -160,4 +165,3 @@
     </script>
 </body>
 </html>
-
