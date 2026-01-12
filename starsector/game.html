@@ -109,8 +109,11 @@
                         loaded,
                         total: TOTAL,
                         remaining: queue.length,
-                        inFlight
+                        inFlight,
+                        failed,
+                        lastCompletedFile
                     });
+                    ui.log.innerText = `Stall detected: ${loaded}/${TOTAL} (${failed} failed, ${inFlight} in flight)`;
                     lastProgressAt = now;
                 }
             }, WATCHDOG_INTERVAL_MS);
@@ -128,7 +131,8 @@
                         
                         if (loaded % PROGRESS_LOG_BATCH === 0 || performance.now() - lastProgressLogAt >= PROGRESS_LOG_INTERVAL_MS) {
                             ui.bar.style.width = (loaded / TOTAL * 100) + "%";
-                            ui.log.innerText = `Cached: ${loaded} / ${TOTAL}`;
+                            const percent = Math.floor((loaded / TOTAL) * 100);
+                            ui.log.innerText = `Cached: ${loaded}/${TOTAL} (${percent}%) | Failed: ${failed}`;
                             console.info("Prefetch progress", loaded, TOTAL);
                             lastProgressLogAt = performance.now();
                         }
