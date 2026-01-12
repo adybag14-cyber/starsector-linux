@@ -414,6 +414,13 @@
                     console.warn("Missing classpath entries:", missing);
                     ui.log.innerText = `Missing jars: ${missing.join(", ")}`;
                 }
+                if (debugBoot) {
+                    console.info("Boot: assets manifest", {
+                        totalAssets: assets.length,
+                        classpathEntries: classpathEntries.length,
+                        missingEntries: missing
+                    });
+                }
                 const classpath = classpathEntries.map((entry) => "/app/" + entry).join(":");
                 if (debugClasspath) {
                     await probeClasspath(ROOT, classpathEntries);
