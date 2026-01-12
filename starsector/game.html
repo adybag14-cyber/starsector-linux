@@ -166,7 +166,15 @@
             ui.btn.style.display = 'none';
             
             // A. Download Assets
-            await prefetch();
+            const params = new URLSearchParams(window.location.search);
+            const skipPrefetch = params.get("skipPrefetch");
+            if (skipPrefetch === "1" || skipPrefetch === "true") {
+                ui.bar.style.width = "100%";
+                ui.log.innerText = "Prefetch skipped.";
+                console.info("Boot: prefetch skipped via query param");
+            } else {
+                await prefetch();
+            }
             
             // B. Init JVM
             ui.log.innerText = "Initializing Java 17 (Local Runtime)...";
