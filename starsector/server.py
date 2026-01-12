@@ -95,8 +95,9 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 print(f"Server on {PORT}")
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    pass
+    daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 128
 
 with ThreadedTCPServer(("", PORT), ForcedRangeHandler) as httpd:
     httpd.serve_forever()
