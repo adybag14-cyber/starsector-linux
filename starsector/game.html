@@ -86,7 +86,10 @@
             const TOTAL = assets.length;
             let loaded = 0;
             let inFlight = 0;
+            let failed = 0;
             let lastProgressAt = performance.now();
+            let lastProgressLogAt = performance.now();
+            let lastCompletedFile = null;
             
             // Adaptive concurrency to speed up cache priming without overwhelming the UI thread.
             const WORKERS = Math.min(6, navigator.hardwareConcurrency || 4);
@@ -94,6 +97,8 @@
             const REQUEST_TIMEOUT_MS = 15000;
             const WATCHDOG_INTERVAL_MS = 1000;
             const STALL_WARNING_MS = 10000;
+            const PROGRESS_LOG_INTERVAL_MS = 2000;
+            const PROGRESS_LOG_BATCH = 50;
 
             ui.log.innerText = `Queueing ${TOTAL} files...`;
             const queue = [...assets];
@@ -119,15 +124,18 @@
                         await fetchWithTimeout(file, REQUEST_TIMEOUT_MS).then(r => r.blob());
                         loaded++;
                         lastProgressAt = performance.now();
+                        lastCompletedFile = file;
                         
-                        if (loaded % 10 === 0) {
+                        if (loaded % PROGRESS_LOG_BATCH === 0 || performance.now() - lastProgressLogAt >= PROGRESS_LOG_INTERVAL_MS) {
                             ui.bar.style.width = (loaded / TOTAL * 100) + "%";
                             ui.log.innerText = `Cached: ${loaded} / ${TOTAL}`;
                             console.info("Prefetch progress", loaded, TOTAL);
+                            lastProgressLogAt = performance.now();
                         }
                         // Yield to UI thread
                         await new Promise(r => setTimeout(r, DELAY_MS));
                     } catch (e) {
+                        failed++;
                         console.warn("Skip:", file, e);
                     } finally {
                         inFlight = Math.max(0, inFlight - 1);
@@ -140,7 +148,12 @@
             clearInterval(watchdog);
             ui.bar.style.width = "100%";
             ui.log.innerText = `Cache complete: ${loaded} / ${TOTAL}`;
-            console.info("Prefetch complete", loaded, TOTAL);
+            console.info("Prefetch complete", {
+                loaded,
+                total: TOTAL,
+                failed,
+                lastCompletedFile
+            });
         }
 
         // --- 2. ENGINE BOOT ---
