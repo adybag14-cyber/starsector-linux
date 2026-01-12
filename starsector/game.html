@@ -299,6 +299,7 @@
                 document.getElementById('ui-layer').style.display = 'none';
                 console.info("Boot: launching StarfarerLauncher", { time: performance.now() });
                 console.info("Boot: dumpAllThreads available", typeof window.dumpAllThreads);
+                queueThreadDump(0, "launcher started");
                 queueThreadDump(5000, "launcher still running after 5s");
                 queueThreadDump(20000, "launcher still running after 20s");
                 try {
