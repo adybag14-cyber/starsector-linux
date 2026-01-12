@@ -51,6 +51,11 @@
             console.info(message, meta ?? { time: performance.now() });
         }
 
+        function logDuration(label, startTime) {
+            const elapsedMs = performance.now() - startTime;
+            console.info(`Boot: ${label}`, { elapsedMs });
+        }
+
         function isTruthyParam(value) {
             if (!value) {
                 return false;
@@ -219,6 +224,7 @@
             const params = new URLSearchParams(window.location.search);
             const skipPrefetch = isTruthyParam(params.get("skipPrefetch"));
             const debugRanges = isTruthyParam(params.get("debugRanges"));
+            const debugBoot = isTruthyParam(params.get("debugBoot"));
             if (skipPrefetch) {
                 ui.bar.style.width = "100%";
                 ui.log.innerText = "Prefetch skipped.";
@@ -230,13 +236,25 @@
             // B. Init JVM
             const ROOT = window.location.origin + "/";
             logPhase("Initializing Java 17 (Local Runtime)...");
-            console.info("Boot: starting cheerpjInit", { root: ROOT, time: performance.now(), debugRanges });
+            console.info("Boot: starting cheerpjInit", { root: ROOT, time: performance.now(), debugRanges, debugBoot });
 
             try {
+                if (debugBoot) {
+                    console.info("Boot: environment", {
+                        userAgent: navigator.userAgent,
+                        platform: navigator.platform,
+                        hardwareConcurrency: navigator.hardwareConcurrency,
+                        deviceMemory: navigator.deviceMemory,
+                        language: navigator.language,
+                        languages: navigator.languages
+                    });
+                }
+
                 if (debugRanges) {
                     await probeRuntimeAssets(ROOT);
                 }
 
+                const cheerpjInitStart = performance.now();
                 await cheerpjInit({
                     natives: { window: { lwjglCanvasElement: document.getElementById("display") } },
                     fileSystem: {
@@ -291,6 +309,7 @@
                     ]
                 });
                 console.info("Boot: cheerpjInit completed", { time: performance.now() });
+                logDuration("cheerpjInit duration", cheerpjInitStart);
 
                 cheerpjCreateDisplay(1280, 768);
                 console.info("Boot: display created", { width: 1280, height: 768, time: performance.now() });
@@ -361,8 +380,10 @@
                     { delay: 60000, label: "launcher still running after 60s" }
                 ].forEach(({ delay, label }) => queueThreadDump(delay, label));
                 try {
+                    const runMainStart = performance.now();
                     await cheerpjRunMain("com.fs.starfarer.StarfarerLauncher", classpath);
                     console.info("Boot: launcher exited", { time: performance.now() });
+                    logDuration("launcher run duration", runMainStart);
                 } finally {
                     cancelThreadDumps();
                 }
