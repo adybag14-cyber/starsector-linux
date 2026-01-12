@@ -64,6 +64,14 @@
             return normalized === "1" || normalized === "true" || normalized === "yes";
         }
 
+        function parseRuntimeVersion(paramValue) {
+            if (!paramValue) {
+                return "17";
+            }
+            const normalized = paramValue.trim();
+            return normalized === "8" ? "8" : "17";
+        }
+
         function scheduleThreadDump(delayMs, label) {
             return setTimeout(async () => {
                 console.info(`Boot: ${label}`, { time: performance.now() });
@@ -236,6 +244,7 @@
             const debugBoot = isTruthyParam(params.get("debugBoot"));
             const debugJvm = isTruthyParam(params.get("debugJvm"));
             const debugClasspath = isTruthyParam(params.get("debugClasspath"));
+            const runtimeVersion = parseRuntimeVersion(params.get("runtime"));
             if (skipPrefetch) {
                 ui.bar.style.width = "100%";
                 ui.log.innerText = "Prefetch skipped.";
@@ -253,7 +262,8 @@
                 debugRanges,
                 debugBoot,
                 debugJvm,
-                debugClasspath
+                debugClasspath,
+                runtimeVersion
             });
 
             try {
@@ -310,6 +320,11 @@
                     console.info("Boot: JVM arguments", baseArguments);
                 }
 
+                const runtimeUrl = runtimeVersion === "8" ? "/8/jre/lib/rt.jar" : "/17/lib/modules";
+                if (debugBoot) {
+                    console.info("Boot: runtime config", { runtimeVersion, runtimeUrl });
+                }
+
                 await cheerpjInit({
                     natives: { window: { lwjglCanvasElement: document.getElementById("display") } },
                     fileSystem: {
@@ -319,9 +334,9 @@
                         upper: { type: "indexedDB", name: "starsector_node_v1" }
                     },
                     // LOCAL MIRROR CONFIGURATION
-                    runtime: { version: "17", url: "/17/lib/modules" },
+                    runtime: { version: runtimeVersion, url: runtimeUrl },
                     javaProperties: [
-                        "java.version=17", "os.name=Linux",
+                        `java.version=${runtimeVersion}`, "os.name=Linux",
                         "file.encoding=UTF-8",
                         "user.dir=/app", "user.home=/app/saves",
                         
