@@ -62,6 +62,7 @@ class ForcedRangeHandler(http.server.SimpleHTTPRequestHandler):
 
             end = min(end, file_len - 1)
             self.range = (start, end)
+            self.log_message("Range request %s -> %s", range_spec, self.range)
             self.send_response(206)
             self.send_header("Content-type", ctype)
             self.send_header("Content-Range", f"bytes {start}-{end}/{file_len}")
