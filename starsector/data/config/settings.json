@@ -9,7 +9,7 @@
 	"fps":60,
 	"devMode":false,
 	"godMode":false, # 100x damage dealt, no damage taken
-	"playtestingMode":false, # turns off some debug flags while in dev mode; doesn't do anything if not in dev mode.
+	"playtestingMode":false, # turns off some debug flags while in dev mode, doesn't do anything if not in dev mode.
 	
 	# if set to true, will print which rules are checked, which conditions pass/fail, etc
 	# also likely to add a noticeable delay to when interaction options are selected
@@ -18,12 +18,12 @@
 	
 	"queryMaxAASamples":true,
 	"maxAASamples":16, # selectable value is limited by this
-	"aaSamplesOverride":-1, # >= 0 overrides value selected in launcher; required to use AA samples with legacyLauncher
+	"aaSamplesOverride":-1, # >= 0 overrides value selected in launcher, required to use AA samples with legacyLauncher
 	"screenScaleOverride":0, # > 0 overrides UI scaling value from in-game settings 
 	"enableLauncherWarnings":true,
 	
 	
-	# experimental feature; can cause problems such as invisible ships in combat and mouse-panning issues
+	# experimental feature, can cause problems such as invisible ships in combat and mouse-panning issues
 	# but only on some PCs
 	"allowJVMRestartFromLauncher":false,
 	"allowJVMRestartFromLauncherInDevMode":false,
@@ -118,7 +118,7 @@
 	
 	# no longer used due to saving/loading rendering happening on the main thread, bypassing the issue
 	#"processMessagesWhileSavingOrLoading":true, # setting to false might work around graphics driver crashes while saving/loading game
-	# adding out of an abundance of caution; *may* (but unlikely to) have same impact as above setting
+	# adding out of an abundance of caution, *may* (but unlikely to) have same impact as above setting
 	# setting to false will prevent save/load progress bar from rendering at all 
 	"updateDisplayDuringSavingOrLoading":true,
 	
@@ -182,8 +182,8 @@
 	"drop_prob_mult_ai_core_capital":4,
 	"drop_prob_mult_ai_core_station":1000, # the station always drops it
 	
-	# Shrouded Dweller substrate drops; can also do substrate_<hull_id> to override 
-	"substrate_FRIGATE":[0.0, 0.03];
+	# Shrouded Dweller substrate drops, can also do substrate_<hull_id> to override 
+	"substrate_FRIGATE":[0.0, 0.03],
 	"substrate_DESTROYER":[0.05, 0.1],
 	"substrate_CRUISER":[0.5, 1.0],
 	"substrate_CAPITAL_SHIP":[2, 4],
@@ -515,7 +515,7 @@
 	"potentialContactProbabilityAddPerFail":0.1,
 	
 	
-	# ship weapons and fighters; need to be cheaper to sell to avoid some ship production exploits
+	# ship weapons and fighters, need to be cheaper to sell to avoid some ship production exploits
 	# weapons now cost credits when produced, so: can be a more normal price
 	"shipWeaponBaseValueMult":1, # direct multiplier for base value when it's loaded from weapon_data.csv
 	"fighterLPCBaseValueMult":1, # direct multiplier for base value when it's loaded from wing_data.csv
@@ -645,9 +645,9 @@
 	"probToLoseSnifferPerMonthPerExtra":0.2,
 
 	# unused: see GenericMissionManager and GenericMissionCreator.getMissionFrequencyWeight()	
-	#"maxMarketProcurementConcurrent":30;
-	#"maxAnalyzeEntityConcurrent":30;
-	#"maxSurveyPlanetConcurrent":15;
+	#"maxMarketProcurementConcurrent":30,
+	#"maxAnalyzeEntityConcurrent":30,
+	#"maxSurveyPlanetConcurrent":15,
 	
 	"targetNumTradeFleetNotifications":15,
 
@@ -689,14 +689,14 @@
 	"lessDModsOnRecoverableEnemyShipMultNext":0.5f,
 	"maxDModsAddedByCombat":5, # could be exceeded from always-added-on-ship-destroyed dmods
 	
-	#"salvageOwnWeaponProb":0.5;
-	#"salvageOwnWingProb":0.5;
-	"salvageOwnWeaponProb":1;
-	"salvageOwnWingProb":1;
-	"salvageWeaponProb":0.25;
-	"salvageWingProb":0.25;
-	"salvageHullmodProb":0.02;
-	"salvageHullmodRequiredItemProb":0.05;
+	#"salvageOwnWeaponProb":0.5,
+	#"salvageOwnWingProb":0.5,
+	"salvageOwnWeaponProb":1,
+	"salvageOwnWingProb":1,
+	"salvageWeaponProb":0.25,
+	"salvageWingProb":0.25,
+	"salvageHullmodProb":0.02,
+	"salvageHullmodRequiredItemProb":0.05,
 	
 	"baseSurveyXP":20,
 	
@@ -776,7 +776,7 @@
 	"adminBaseProb":0.05,
 	"adminProbPerColonySize":0.05,
 	"maxOfficerPromoteProb":0.1, # post-combat
-	"officerPromoteProbMult":0.2, # post-combat; multiplier applied to ratio of FP destroyed to player fleet FP
+	"officerPromoteProbMult":0.2, # post-combat, multiplier applied to ratio of FP destroyed to player fleet FP
 	
 	"officerMercMinLevel":4,
 	"officerMercMaxLevel":6,
@@ -793,7 +793,7 @@
 	"standardSleeperPodsOfficerLevel":5,
 	"exceptionalSleeperPodsOfficerLevel":7,
 	"exceptionalSleeperPodsOfficerEliteSkills":5,
-	"maxExceptionalSleeperPodsOfficers":4, # per Sector; can be generated in derelict ships, too, so eventually there WILL be that many
+	"maxExceptionalSleeperPodsOfficers":4, # per Sector, can be generated in derelict ships, too, so eventually there WILL be that many
 	"probSleeperPodsOfficerIsExceptional":0.2, # there's 20ish sleeper pod officers total
 	"probSleeperPodsUnexceptionalOfficerUseTemplate":0.5,
 	
@@ -802,11 +802,11 @@
 	"commanderLevelForOneSkill":4,
 	"baseFPPerAICore":20, # remnant fleets
 	#"baseFPPerOfficer":20, # halved when officer doctrine setting is maxed
-	"baseCombatShipsPerOfficer":3, # halved when officer doctrine setting is maxed; not used for AI core using fleets
-	"baseCombatShipsForMaxOfficerLevel":16, # halved when officer doctrine setting is maxed; not used for AI core using fleets
+	"baseCombatShipsPerOfficer":3, # halved when officer doctrine setting is maxed, not used for AI core using fleets
+	"baseCombatShipsForMaxOfficerLevel":16, # halved when officer doctrine setting is maxed, not used for AI core using fleets
 	"officerAIMaxMercsMult":1, # maximum "over-the-limit" merc-type officers that can be added to an AI fleet, times doctrine officer setting
-	#"officerAIMercsStartingFP":100, # start adding more "merc" officers at this threshold; no longer used
-	"baseNumOfficers":8; # in a fleet w/o officer management skills
+	#"officerAIMercsStartingFP":100, # start adding more "merc" officers at this threshold, no longer used
+	"baseNumOfficers":8, # in a fleet w/o officer management skills
 	
 	"crewSalary":10, # credits per crew per month
 	"marineSalary":20, # credits per marine per month
@@ -819,13 +819,13 @@
 	"baseRepairRateCruiser":8,
 	"baseRepairRateCapital":6,
 	
-	"suppliesPerMarinePerDay":0;
-	"suppliesPerCrewPerDay":0;
-	"suppliesPerCargoUnitOverCapacity":0.1;
-	"suppliesPerFuelUnitOverCapacity":0.1;
-	"suppliesPerPersonnelUnitOverCapacity":0.1;
-	"maxSuppliesPerDayForOverCapacity":50; # for each type of capacity, so, max 150 total
-	"supplyConsumptionMothballedMult":0;
+	"suppliesPerMarinePerDay":0,
+	"suppliesPerCrewPerDay":0,
+	"suppliesPerCargoUnitOverCapacity":0.1,
+	"suppliesPerFuelUnitOverCapacity":0.1,
+	"suppliesPerPersonnelUnitOverCapacity":0.1,
+	"maxSuppliesPerDayForOverCapacity":50, # for each type of capacity, so, max 150 total
+	"supplyConsumptionMothballedMult":0,
 	
 	"suppliesPerShipOverMaxInFleet":0.2, # this is actually a fraction for the total maintenance cost, this * (ships - maxShipsInFleet) 
 	
@@ -869,9 +869,9 @@
 	"sensorRangeMaxHyper":2000, # anything beyond gets culled from detection checks (in hyperspace)
 	
 	# old sensor mechanics
-	#"sensorRangeBase":400, # detection range for sensor str 1 vs sensor profile 1; others ranges based on this + log scale
+	#"sensorRangeBase":400, # detection range for sensor str 1 vs sensor profile 1, others ranges based on this + log scale
 	#"sensorRangeMax":5000, # anything beyond gets culled from detection checks
-	#"sensorStrengthMin":4, # "low engine interference" strength bonus up to this value; unused
+	#"sensorStrengthMin":4, # "low engine interference" strength bonus up to this value, unused
 	
 	"detectionRangeTransponderMult":1, # multiplier to detection range (NOT sensor profile) when BOTH fleets have transponders on
 	"detectionRangeDetailsMult":0.5, # fraction of max detection range at which fleet composition is visible w/ transponder off
@@ -901,7 +901,7 @@
 	"noDeployCRPercent":0,
 	"noDeployCrewPercent":5,
 	
-	"emergencyRepairsMaxDPValue":80;
+	"emergencyRepairsMaxDPValue":80,
 	
 	# story point costs for things that cost more than one point
 	"historianSpecialItemBase":4, # doubles for each successive item 
@@ -1061,7 +1061,7 @@
 	"hColor":[255,210,0,255],  # highlight color, shorter version for use in reports.csv/rules.csv
 	"defaultFont":"graphics/fonts/insignia15LTaa.fnt",
 	
-	"italicsShearFactor":0.2, # for default LabelAPI.italicize(); amount of shear to the right
+	"italicsShearFactor":0.2, # for default LabelAPI.italicize(), amount of shear to the right
 
 	"mountYellowColor":[255,215,0,255],
 	"mountGreenColor":[155,255,0,255],
@@ -1558,7 +1558,7 @@
 			
 			"red_planet":"graphics/icons/intel/red_planet.png",
 
-			# these should be under "characters"; leaving here for now -am			
+			# these should be under "characters", leaving here for now -am			
 			"old_spacer_female":"graphics/portraits/characters/old_spacer01.png",
 			"old_spacer_male":"graphics/portraits/characters/old_spacer02.png",
 			"historian_female":"graphics/portraits/characters/historian01.png",
@@ -2259,6 +2259,7 @@
 		},		
 	}
 }
+
 
 
 

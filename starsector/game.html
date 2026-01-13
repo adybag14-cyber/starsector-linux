@@ -1,99 +1,90 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="utf-8">
-    <title>Starsector Node.js Edition</title>
-    <script src="/loader.js"></script>
+    <title>Starsector Web</title>
+    <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
     <style>
-        body { margin: 0; background: #050505; color: #00ff00; font-family: monospace; overflow: hidden; }
-        
-        #ui-layer {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;
-            background: rgba(0,0,0,0.95); display: flex; flex-direction: column;
-            align-items: center; justify-content: center;
-        }
-        
-        #progress-container { width: 600px; height: 4px; background: #333; margin: 20px 0; }
-        #progress-bar { width: 0%; height: 100%; background: #00ff00; transition: width 0.1s; }
-        #log-text { color: #888; font-size: 12px; margin-top: 10px; }
-        
-        button {
-            padding: 15px 40px; background: transparent; border: 2px solid #00ff00;
-            color: #00ff00; font-size: 18px; font-weight: bold; cursor: pointer;
-        }
-        button:hover { background: #00ff00; color: black; }
-        
-        canvas { display: block; width: 100vw; height: 100vh; position: absolute; top:0; left:0; }
+        body { margin: 0; background: #000; color: #0f0; font-family: monospace; }
+        #ui { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 100; }
+        #progress { width: 400px; height: 10px; border: 1px solid #0f0; margin: 10px auto; }
+        #bar { width: 0%; height: 100%; background: #0f0; }
+        button { padding: 10px 20px; background: #000; color: #0f0; border: 1px solid #0f0; cursor: pointer; }
+        canvas { display: block; width: 100vw; height: 100vh; }
     </style>
 </head>
 <body>
-    <div id="ui-layer">
-        <h1 style="text-shadow: 0 0 15px #00ff00;">STARSECTOR KERNEL</h1>
-        <div id="progress-container"><div id="progress-bar"></div></div>
-        <div id="log-text">System Ready.</div>
-        <br>
-        <button id="btn">INITIALIZE</button>
+    <div id="ui">
+        <h1>STARSECTOR</h1>
+        <div id="progress"><div id="bar"></div></div>
+        <div id="status">Ready</div><br>
+        <button id="btn">START ENGINE</button>
     </div>
     <canvas id="display"></canvas>
 
     <script type="module">
         const ui = {
-            bar: document.getElementById('progress-bar'),
-            log: document.getElementById('log-text'),
+            bar: document.getElementById('bar'),
+            status: document.getElementById('status'),
             btn: document.getElementById('btn'),
-            layer: document.getElementById('ui-layer')
+            ui: document.getElementById('ui')
         };
 
-        // --- 0. OVERCLOCK PATCH (AI OPTIMIZATION) ---
-        // Force the engine to run faster than 60Hz by bypassing the browser's VSync
-        window.requestAnimationFrame = (callback) => setTimeout(callback, 0);
+        // OVERCLOCK: Bypass VSync for faster loop
+        window.requestAnimationFrame = (callback) => setTimeout(callback, 1);
 
-        // --- 1. THROTTLED PREFETCHER (Fixes Browser Freeze) ---
+        // --- 1. WALL BREAKER PREFETCHER ---
         async function prefetch() {
-            ui.log.innerText = "Loading Manifest...";
+            ui.status.innerText = "Loading Manifest...";
             const assets = await fetch('assets.json').then(r => r.json());
             
             const TOTAL = assets.length;
             let loaded = 0;
-            
-            // Matches Report: Reduced concurrency to 2
-            const WORKERS = 2;
-            const DELAY_MS = 10; 
+            let skipped = 0;
+            const WORKERS = 4;
+            const TIMEOUT_MS = 10000; // 10s timeout per file
 
-            ui.log.innerText = `Queueing ${TOTAL} files...`;
-            const queue = [...assets];
+            ui.status.innerText = "Queueing " + TOTAL + " files...";
+            const queue = assets.filter(f => (f.endsWith('.jar') || f.endsWith('.json') || f.endsWith('.csv')) && !f.includes('/8/jre/') && !f.includes('/17/jre/') && !f.includes('/jre_linux/'));
 
             async function worker() {
                 while (queue.length > 0) {
                     const file = queue.shift();
+                    
                     try {
-                        // Fetch and Blob to force storage in browser cache
-                        await fetch(file).then(r => r.blob());
-                        loaded++;
+                        const controller = new AbortController();
+                        const id = setTimeout(() => controller.abort(), TIMEOUT_MS);
                         
+                        const response = await fetch(file, { signal: controller.signal });
+                        clearTimeout(id);
+                        
+                        if (!response.ok) throw new Error(response.status);
+                        await response.blob();
+                        
+                        loaded++;
                         if (loaded % 10 === 0) {
-                            ui.bar.style.width = (loaded / TOTAL * 100) + "%";
-                            ui.log.innerText = `Cached: ${loaded} / ${TOTAL}`;
+                            const p = (loaded / TOTAL * 100).toFixed(1);
+                            ui.bar.style.width = p + "%";
+                            ui.status.innerText = "Cached: " + loaded + " / " + TOTAL + " (Skipped: " + skipped + ")";
                         }
-                        // Yield to UI thread
-                        await new Promise(r => setTimeout(r, DELAY_MS));
-                    } catch (e) { console.warn("Skip:", file); }
+                    } catch (e) { 
+                        skipped++;
+                        console.warn("SKIPPED (Timeout/Error):", file, e);
+                    }
                 }
             }
 
             const threads = Array(WORKERS).fill(null).map(() => worker());
             await Promise.all(threads);
+            ui.status.innerText = "Prefetch Complete. Skipped: " + skipped + ". Booting JVM...";
         }
 
         // --- 2. ENGINE BOOT ---
         ui.btn.addEventListener('click', async () => {
             ui.btn.style.display = 'none';
+            // await prefetch();
             
-            // A. Download Assets
-            await prefetch();
-            
-            // B. Init JVM
-            ui.log.innerText = "Initializing Java 17 (Local Runtime)...";
+            ui.status.innerText = "Initializing Java 17 (Local Runtime)...";
             const ROOT = window.location.origin + "/";
 
             try {
@@ -103,24 +94,18 @@
                         mountPoint: "/app",
                         type: "overlay",
                         lower: { type: "http", url: ROOT },
-                        upper: { type: "indexedDB", name: "starsector_node_v1" }
+                        upper: { type: "indexedDB", name: "starsector_v1" }
                     },
-                    // LOCAL MIRROR CONFIGURATION
-                    runtime: { version: "17", url: "/17/lib/modules" },
+                    runtime: { version: "8", url: "/8/jre/lib/rt.jar" },
                     javaProperties: [
-                        "java.version=17", "os.name=Linux",
+                        "java.version=1.8", "os.name=Linux",
                         "user.dir=/app", "user.home=/app/saves",
-                        
-                        // Native Path Fix
                         "java.library.path=/app/native/linux:/app/native",
                         "org.lwjgl.librarypath=/app/native/linux:/app/native",
-
-                        // Path Redirects
-                        "-Dcom.fs.starfarer.settings.paths.mods=/app/mods",
-                        "-Dcom.fs.starfarer.settings.paths.saves=/app/saves",
-                        "-Dcom.fs.starfarer.settings.paths.logs=/app/logs",
-                        "-Dfs.game.dir=/app",
-                        
+                        "com.fs.starfarer.settings.paths.mods=/app/mods",
+                        "com.fs.starfarer.settings.paths.saves=/app/saves",
+                        "com.fs.starfarer.settings.paths.logs=/app/logs",
+                        "fs.game.dir=/app", "com.fs.starfarer.settings.linux=true", "log4j.configuration=/app/console_log4j.properties",
                         "legacyLauncher=true", "log4j.debug=true", "java.awt.headless=false"
                     ],
                     arguments: [
@@ -133,31 +118,32 @@
                 });
 
                 cheerpjCreateDisplay(1280, 768);
-
-                // C. Launch
-                ui.log.innerText = "Executing CombatMain...";
+                ui.status.innerText = "Executing CombatMain...";
                 
-                // Build Classpath dynamically from manifest (JARs only)
                 const assets = await fetch('assets.json').then(r => r.json());
                 const classpath = assets
-                    .filter(f => f.endsWith('.jar'))
+                    .filter(f => f.endsWith('.jar') && !f.includes('/'))
                     .map(f => "/app/" + f)
                     .join(":");
 
-                // Auto-create log file to ensure write layer is active
-                const addFile = window.cheerpOSAddStringFile || window.cheerpjAddStringFile;
-                try { await addFile("/app/starsector.log", "Init"); } catch(e){}
-
-                document.getElementById('ui-layer').style.display = 'none';
-                await cheerpjRunMain("com.fs.starfarer.combat.CombatMain", classpath);
+                console.log('Classpath:', classpath); await cheerpjRunMain("com.fs.starfarer.combat.CombatMain", classpath);
+                ui.ui.style.display = 'none';
 
             } catch (e) {
-                ui.log.innerText = "FATAL: " + e.message;
-                ui.log.style.color = "red";
+                ui.status.innerText = "FATAL: " + e.message;
+                ui.status.style.color = "red";
                 console.error(e);
             }
         });
     </script>
 </body>
 </html>
+
+
+
+
+
+
+
+
 

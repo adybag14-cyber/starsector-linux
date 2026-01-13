@@ -6,76 +6,126 @@ const PORT = 8091;
 const ROOT = process.cwd();
 
 const MIME_TYPES = {
-    '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json',
-    '.css': 'text/css', '.png': 'image/png', '.jpg': 'image/jpeg',
-    '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.jar': 'application/java-archive',
-    '.wasm': 'application/wasm', '.class': 'application/java-vm'
+    ".html": "text/html", ".js": "text/javascript", ".json": "application/json",
+    ".css": "text/css", ".png": "image/png", ".jpg": "image/jpeg",
+    ".wav": "audio/wav", ".ogg": "audio/ogg", ".jar": "application/java-archive",
+    ".wasm": "application/wasm", ".class": "application/java-vm",
+    ".ship": "application/json", ".variant": "application/json",
+    ".system": "application/json", ".wpn": "application/json",
+    ".proj": "application/json", ".faction": "application/json",
+    ".xml": "text/xml", ".properties": "text/plain", ".csv": "text/plain"
 };
 
 const server = http.createServer((req, res) => {
-    // 1. SECURITY HEADERS
+    if (req.method === 'POST' && req.url === '/log') {
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+        req.on('end', () => {
+            console.log("[CLIENT-LOG]", body);
+            res.writeHead(200);
+            res.end();
+        });
+        return;
+    }
+    
+    // Allow Cross-Origin for CDN
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Expose-Headers', '*');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
     res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'no-store'); 
 
-    // Path Logic
-    let safePath = path.normalize(decodeURI(req.url.split('?')[0]));
-    if (safePath === '/' || safePath === '\\') safePath = '/game.html';
-    if (safePath.startsWith('..')) safePath = '/game.html'; 
-
+    let reqPath = decodeURI(req.url.split("?")[0]);
+    if (reqPath === '/starsector-core' || reqPath === '/starsector-core/') reqPath = '/';
+    else if (reqPath.startsWith('/starsector-core/')) reqPath = reqPath.substring(16);
+    if (reqPath.startsWith('/17/conf/')) reqPath = '/jre_linux/conf/' + reqPath.substring(9);
+    
+    let safePath = path.normalize(reqPath);
+    if (safePath === "." || safePath === "\\") safePath = "/";
     const filePath = path.join(ROOT, safePath);
 
     fs.stat(filePath, (err, stats) => {
-        if (err || !stats.isFile()) {
-            // Log 404s for debugging
+        if (err || !stats) {
             console.log(`[404] ${req.url}`);
             res.writeHead(404);
             res.end('404 Not Found');
             return;
         }
-
+        
         const ext = path.extname(filePath).toLowerCase();
-        res.setHeader('Content-Type', MIME_TYPES[ext] || 'application/octet-stream');
-        res.setHeader('Accept-Ranges', 'bytes'); // CRITICAL FOR CHEERPJ
+        const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
-        // RANGE REQUEST HANDLING
+        if (stats.isDirectory()) {
+            if (req.method === 'HEAD') {
+                res.writeHead(200, { 'Content-Type': 'text/html', 'Accept-Ranges': 'bytes' });
+                res.end();
+                return;
+            }
+            fs.readdir(filePath, (err, files) => {
+                if (err) { res.writeHead(500); res.end(); return; }
+                const html = "<html><body>" + files.map(f => "<a href=\"" + f + "\">" + f + "</a>").join("") + "</body></html>";
+                res.writeHead(200, { 
+                    "Content-Type": "text/html", 
+                    "Content-Length": Buffer.byteLength(html),
+                    "Accept-Ranges": "bytes"
+                });
+                res.end(html);
+            });
+            return;
+        }
+
+        if (req.method === 'HEAD') {
+             res.writeHead(200, {
+                 'Content-Length': stats.size,
+                 'Accept-Ranges': 'bytes',
+                 'Content-Type': contentType
+             });
+             res.end();
+             return;
+        }
+
         const range = req.headers.range;
         if (range) {
             const parts = range.replace(/bytes=/, "").split("-");
-            let start = parseInt(parts[0], 10);
-            let end = parts[1] ? parseInt(parts[1], 10) : stats.size - 1;
+            const sStr = parts[0], eStr = parts[1];
+            let start, end;
+            if (sStr === "") { start = stats.size - parseInt(eStr, 10); end = stats.size - 1; }
+            else if (eStr === "") { start = parseInt(sStr, 10); end = stats.size - 1; }
+            else { start = parseInt(sStr, 10); end = parseInt(eStr, 10); }
             
-            if (isNaN(start)) start = 0;
+            if (start < 0) start = 0;
             if (end >= stats.size) end = stats.size - 1;
-
-            if (start >= stats.size) {
+            
+            if (start > end) {
                 res.writeHead(416, { 'Content-Range': `bytes */${stats.size}` });
                 res.end();
                 return;
             }
-
-            const chunksize = (end - start) + 1;
+            
             res.writeHead(206, {
                 'Content-Range': `bytes ${start}-${end}/${stats.size}`,
-                'Content-Length': chunksize
+                'Content-Length': (end - start) + 1,
+                'Content-Type': contentType,
+                'Accept-Ranges': 'bytes'
             });
-            fs.createReadStream(filePath, { start, end }).pipe(res);
+            const stream = fs.createReadStream(filePath, { start, end });
+            stream.pipe(res);
+            res.on('close', () => stream.destroy());
         } else {
-            res.writeHead(200, { 'Content-Length': stats.size });
-            fs.createReadStream(filePath).pipe(res);
+            res.writeHead(200, { 
+                'Content-Length': stats.size, 
+                'Content-Type': contentType,
+                'Accept-Ranges': 'bytes' 
+            });
+            const stream = fs.createReadStream(filePath);
+            stream.pipe(res);
+            res.on('close', () => stream.destroy());
         }
-
-        // 2. SILENT LOGGING
-        if (!['.png', '.jpg', '.wav', '.ogg', '.class', '.json', '.xml'].includes(ext)) {
-            console.log(`[REQ] ${req.url}`);
-        }
+        console.log(`[REQ] ${req.url} ${range ? '('+range+')' : ''}`);
     });
 });
 
 server.listen(PORT, () => {
-    console.log(`--- STARSECTOR NODE.JS SERVER (Port ${PORT}) ---
-`);
-    console.log(`Mode: Silent Logging + Range Support | COEP: Credentialless
-`);
+    console.log(`--- STARSECTOR NODE.JS SERVER (Port ${PORT}) ---`);
 });

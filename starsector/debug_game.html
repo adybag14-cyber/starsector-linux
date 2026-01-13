@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Starsector Web Debug</title>
+    <script src="https://cjrtnc.leaningtech.com/4.2/loader.js"></script>
+    <style>
+        body { margin: 0; background: #000; color: #0f0; font-family: monospace; }
+        #ui { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; z-index: 100; }
+        #status { margin: 10px; }
+        button { padding: 10px 20px; background: #000; color: #0f0; border: 1px solid #0f0; cursor: pointer; }   
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <h1>STARSECTOR DEBUG (Clean VFS)</h1>
+        <div id="status">Ready</div><br>
+        <button id="btn">START ENGINE</button>
+    </div>
+    <canvas id="display"></canvas>
+
+    <script>
+        const ui = {
+            status: document.getElementById('status'),
+            btn: document.getElementById('btn')
+        };
+
+        ui.btn.addEventListener('click', async () => {
+            console.log('BUTTON CLICKED!');
+            ui.btn.style.display = 'none';
+            ui.status.innerText = "Initializing CheerpJ 4.2...";
+            const ROOT = window.location.origin + "/";
+
+            try {
+                await cheerpjInit({
+                    natives: { window: { lwjglCanvasElement: document.getElementById("display") } },
+                    fileSystem: {
+                        mountPoint: "/app",
+                        type: "overlay",
+                        lower: { type: "http", url: ROOT },
+                        upper: { type: "indexedDB", name: "starsector_v10" }
+                    },
+                    version: 17,
+                    javaProperties: [
+                        "java.version=17", "os.name=Linux",
+                        "user.dir=/app", "user.home=/app",
+                        "fs.game.dir=/app",
+                        "log4j.configuration=console_log4j.properties",
+                        "legacyLauncher=true", "log4j.debug=true"
+                    ]
+                });
+
+                const assets = await fetch('assets.json').then(r => r.json());
+                let classpath = assets
+                    .filter(f => f.endsWith('.jar') && !f.includes('/'))
+                    .map(f => "/app/" + f)
+                    .join(":");
+                
+                classpath += ':/app/resources.jar:/app/janino.jar:/app/commons-compiler.jar';
+                console.log("Classpath:", classpath);
+
+                // ui.status.innerText = 'Running LWJGL Check...';
+                // try { await cheerpjRunMain('org.lwjgl.Version', classpath); } catch(e) { console.warn(e); }
+
+                ui.status.innerText = 'Running Shim...';
+                const exitCode = await cheerpjRunMain('Shim', classpath, '/app/Shim.java');
+                console.log("Starsector exited with code:", exitCode);
+
+            } catch (e) {
+                ui.status.innerText = "FATAL: " + e.message;
+                console.error(e);
+            }
+        });
+    </script>
+</body>
+</html>

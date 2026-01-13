@@ -1,1 +1,1 @@
-root:x:0:0:root:/root:/bin/bash
+ady:x:1000:1000:ady:/app:/bin/bash

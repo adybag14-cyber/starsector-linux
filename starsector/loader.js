@@ -4,7 +4,7 @@ if(!self.cj3LoaderPath)
 
 var cj3LoaderPath = cj3InitPath();
 var cj3Module = null;
-var cj3InitOptions = {version:8};
+var cj3InitOptions = {version:17};
 
 function cj3GetStackEntry(s)
 {
@@ -269,3 +269,4 @@ function cheerpjInit(options)
 }
 
 }
+
