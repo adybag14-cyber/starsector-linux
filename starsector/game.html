@@ -44,9 +44,134 @@
             layer: document.getElementById('ui-layer')
         };
 
-        // --- 0. OVERCLOCK PATCH (AI OPTIMIZATION) ---
-        // Force the engine to run faster than 60Hz by bypassing the browser's VSync
-        window.requestAnimationFrame = (callback) => setTimeout(callback, 0);
+        const threadDumpTimeouts = [];
+
+        function logPhase(message, meta) {
+            ui.log.innerText = message;
+            console.info(message, meta ?? { time: performance.now() });
+        }
+
+        function logDuration(label, startTime) {
+            const elapsedMs = performance.now() - startTime;
+            console.info(`Boot: ${label}`, { elapsedMs });
+        }
+
+        function isTruthyParam(value) {
+            if (!value) {
+                return false;
+            }
+            const normalized = value.toLowerCase();
+            return normalized === "1" || normalized === "true" || normalized === "yes";
+        }
+
+        function parseRuntimeVersion(paramValue) {
+            if (!paramValue) {
+                return "17";
+            }
+            const normalized = paramValue.trim();
+            return normalized === "8" ? "8" : "17";
+        }
+
+        function parseMainClass(paramValue) {
+            if (!paramValue) {
+                return "com.fs.starfarer.StarfarerLauncher";
+            }
+            const normalized = paramValue.trim();
+            return normalized.length > 0 ? normalized : "com.fs.starfarer.StarfarerLauncher";
+        }
+
+        function startHeartbeat(intervalMs) {
+            return setInterval(() => {
+                console.info("Boot: heartbeat", {
+                    time: performance.now(),
+                    memory: performance.memory
+                        ? {
+                            totalJSHeapSize: performance.memory.totalJSHeapSize,
+                            usedJSHeapSize: performance.memory.usedJSHeapSize
+                        }
+                        : null
+                });
+            }, intervalMs);
+        }
+
+        function scheduleThreadDump(delayMs, label) {
+            return setTimeout(async () => {
+                console.info(`Boot: ${label}`, { time: performance.now() });
+                if (typeof window.dumpAllThreads !== "function") {
+                    console.warn("Boot: dumpAllThreads not available");
+                    return;
+                }
+                try {
+                    const result = await window.dumpAllThreads();
+                    const payload = typeof result === "string" ? result : JSON.stringify(result);
+                    console.info(`Boot: thread dump (${label})`, payload);
+                } catch (e) {
+                    console.warn("Boot: dumpAllThreads failed", e);
+                }
+            }, delayMs);
+        }
+
+        function queueThreadDump(delayMs, label) {
+            const handle = scheduleThreadDump(delayMs, label);
+            threadDumpTimeouts.push(handle);
+        }
+
+        function cancelThreadDumps() {
+            threadDumpTimeouts.splice(0).forEach((handle) => clearTimeout(handle));
+        }
+
+        function fetchWithTimeout(url, timeoutMs) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            return fetch(url, { signal: controller.signal })
+                .finally(() => clearTimeout(timeout));
+        }
+
+        async function probeRange(url, label) {
+            try {
+                const head = await fetch(url, { method: "HEAD" });
+                const size = head.headers.get("content-length");
+                const acceptRanges = head.headers.get("accept-ranges");
+                console.info("Range probe (HEAD)", { label, url, status: head.status, size, acceptRanges });
+
+                if (!size || head.status >= 400) {
+                    return;
+                }
+                const length = parseInt(size, 10);
+                if (!Number.isFinite(length) || length <= 0) {
+                    return;
+                }
+                const end = Math.min(1023, length - 1);
+                const range = `bytes=0-${end}`;
+                const rangeRes = await fetch(url, { headers: { Range: range } });
+                const contentRange = rangeRes.headers.get("content-range");
+                console.info("Range probe (bytes)", { label, url, status: rangeRes.status, range, contentRange });
+            } catch (e) {
+                console.warn("Range probe failed", { label, url, error: e });
+            }
+        }
+
+        async function probeRuntimeAssets(root) {
+            logPhase("Debug: probing runtime assets...");
+            const probes = [
+                { url: `${root}17/lib/modules`, label: "runtime modules" },
+                { url: `${root}8/jre/lib/rt.jar`, label: "legacy rt.jar" },
+                { url: `${root}starfarer_obf.jar`, label: "starfarer_obf.jar" },
+                { url: `${root}lwjgl.jar`, label: "lwjgl.jar" }
+            ];
+            for (const probe of probes) {
+                // eslint-disable-next-line no-await-in-loop
+                await probeRange(probe.url, probe.label);
+            }
+        }
+
+        async function probeClasspath(root, entries) {
+            logPhase("Debug: probing classpath jars...");
+            for (const entry of entries) {
+                // eslint-disable-next-line no-await-in-loop
+                await probeRange(`${root}${entry}`, `classpath ${entry}`);
+            }
+        }
 
         // --- 1. THROTTLED PREFETCHER (Fixes Browser Freeze) ---
         async function prefetch() {
@@ -55,34 +180,79 @@
             
             const TOTAL = assets.length;
             let loaded = 0;
+            let inFlight = 0;
+            let failed = 0;
+            let lastProgressAt = performance.now();
+            let lastProgressLogAt = performance.now();
+            let lastCompletedFile = null;
             
-            // Matches Report: Reduced concurrency to 2
-            const WORKERS = 2;
-            const DELAY_MS = 10; 
+            // Adaptive concurrency to speed up cache priming without overwhelming the UI thread.
+            const WORKERS = Math.min(6, navigator.hardwareConcurrency || 4);
+            const DELAY_MS = 5; 
+            const REQUEST_TIMEOUT_MS = 15000;
+            const WATCHDOG_INTERVAL_MS = 1000;
+            const STALL_WARNING_MS = 10000;
+            const PROGRESS_LOG_INTERVAL_MS = 2000;
+            const PROGRESS_LOG_BATCH = 50;
 
             ui.log.innerText = `Queueing ${TOTAL} files...`;
             const queue = [...assets];
+            const watchdog = setInterval(() => {
+                const now = performance.now();
+                if (now - lastProgressAt > STALL_WARNING_MS) {
+                    console.warn("Prefetch stall warning", {
+                        loaded,
+                        total: TOTAL,
+                        remaining: queue.length,
+                        inFlight,
+                        failed,
+                        lastCompletedFile
+                    });
+                    ui.log.innerText = `Stall detected: ${loaded}/${TOTAL} (${failed} failed, ${inFlight} in flight)`;
+                    lastProgressAt = now;
+                }
+            }, WATCHDOG_INTERVAL_MS);
 
             async function worker() {
                 while (queue.length > 0) {
                     const file = queue.shift();
                     try {
                         // Fetch and Blob to force storage in browser cache
-                        await fetch(file).then(r => r.blob());
+                        inFlight++;
+                        await fetchWithTimeout(file, REQUEST_TIMEOUT_MS).then(r => r.blob());
                         loaded++;
+                        lastProgressAt = performance.now();
+                        lastCompletedFile = file;
                         
-                        if (loaded % 10 === 0) {
+                        if (loaded % PROGRESS_LOG_BATCH === 0 || performance.now() - lastProgressLogAt >= PROGRESS_LOG_INTERVAL_MS) {
                             ui.bar.style.width = (loaded / TOTAL * 100) + "%";
-                            ui.log.innerText = `Cached: ${loaded} / ${TOTAL}`;
+                            const percent = Math.floor((loaded / TOTAL) * 100);
+                            ui.log.innerText = `Cached: ${loaded}/${TOTAL} (${percent}%) | Failed: ${failed}`;
+                            console.info("Prefetch progress", loaded, TOTAL);
+                            lastProgressLogAt = performance.now();
                         }
                         // Yield to UI thread
                         await new Promise(r => setTimeout(r, DELAY_MS));
-                    } catch (e) { console.warn("Skip:", file); }
+                    } catch (e) {
+                        failed++;
+                        console.warn("Skip:", file, e);
+                    } finally {
+                        inFlight = Math.max(0, inFlight - 1);
+                    }
                 }
             }
 
             const threads = Array(WORKERS).fill(null).map(() => worker());
             await Promise.all(threads);
+            clearInterval(watchdog);
+            ui.bar.style.width = "100%";
+            ui.log.innerText = `Cache complete: ${loaded} / ${TOTAL}`;
+            console.info("Prefetch complete", {
+                loaded,
+                total: TOTAL,
+                failed,
+                lastCompletedFile
+            });
         }
 
         // --- 2. ENGINE BOOT ---
@@ -90,13 +260,98 @@
             ui.btn.style.display = 'none';
             
             // A. Download Assets
-            await prefetch();
+            const params = new URLSearchParams(window.location.search);
+            const skipPrefetch = isTruthyParam(params.get("skipPrefetch"));
+            const debugRanges = isTruthyParam(params.get("debugRanges"));
+            const debugBoot = isTruthyParam(params.get("debugBoot"));
+            const debugJvm = isTruthyParam(params.get("debugJvm"));
+            const debugClasspath = isTruthyParam(params.get("debugClasspath"));
+            const runtimeVersion = parseRuntimeVersion(params.get("runtime"));
+            const mainClass = parseMainClass(params.get("mainClass"));
+            const heartbeatEnabled = isTruthyParam(params.get("debugHeartbeat"));
+            if (skipPrefetch) {
+                ui.bar.style.width = "100%";
+                ui.log.innerText = "Prefetch skipped.";
+                console.info("Boot: prefetch skipped via query param");
+            } else {
+                await prefetch();
+            }
             
             // B. Init JVM
-            ui.log.innerText = "Initializing Java 17 (Local Runtime)...";
             const ROOT = window.location.origin + "/";
+            logPhase("Initializing Java 17 (Local Runtime)...");
+            console.info("Boot: starting cheerpjInit", {
+                root: ROOT,
+                time: performance.now(),
+                debugRanges,
+                debugBoot,
+                debugJvm,
+                debugClasspath,
+                runtimeVersion,
+                mainClass,
+                heartbeatEnabled
+            });
 
             try {
+                if (debugBoot) {
+                    console.info("Boot: environment", {
+                        userAgent: navigator.userAgent,
+                        platform: navigator.platform,
+                        hardwareConcurrency: navigator.hardwareConcurrency,
+                        deviceMemory: navigator.deviceMemory,
+                        language: navigator.language,
+                        languages: navigator.languages,
+                        memory: performance.memory
+                            ? {
+                                jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+                                totalJSHeapSize: performance.memory.totalJSHeapSize,
+                                usedJSHeapSize: performance.memory.usedJSHeapSize
+                            }
+                            : null
+                    });
+                }
+
+                if (debugRanges) {
+                    await probeRuntimeAssets(ROOT);
+                }
+
+                const cheerpjInitStart = performance.now();
+                const baseArguments = [
+                    "--enable-preview",
+                    "--add-opens=java.base/java.lang=ALL-UNNAMED",
+                    "--add-opens=java.base/java.util=ALL-UNNAMED",
+                    "--add-opens=java.base/java.nio=ALL-UNNAMED",
+                    "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+                    "--add-opens=java.base/java.nio.Buffer.UNSAFE=ALL-UNNAMED",
+                    "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+                    "--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED",
+                    "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
+                    "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+                    "--add-opens=java.base/java.lang.ref=ALL-UNNAMED",
+                    "--add-opens=java.base/java.text=ALL-UNNAMED",
+                    "--add-opens=java.desktop/java.awt.font=ALL-UNNAMED",
+                    "--add-opens=java.desktop/java.awt.Rectangle=ALL-UNNAMED",
+                    "--add-opens=java.desktop/java.awt=ALL-UNNAMED",
+                    "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED",
+                    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+                    "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
+                    "-Xmx1500m",
+                    "-Xms512m",
+                    "-Xss4m"
+                ];
+                if (debugJvm) {
+                    baseArguments.push("-Xlog:os+thread=info", "-Xlog:class+load=info");
+                }
+                if (debugBoot) {
+                    console.info("Boot: JVM arguments", baseArguments);
+                }
+
+                const runtimeUrl = runtimeVersion === "8" ? "/8/jre/lib/rt.jar" : "/17/lib/modules";
+                if (debugBoot) {
+                    console.info("Boot: runtime config", { runtimeVersion, runtimeUrl });
+                }
+
+                const heartbeatHandle = heartbeatEnabled ? startHeartbeat(5000) : null;
                 await cheerpjInit({
                     natives: { window: { lwjglCanvasElement: document.getElementById("display") } },
                     fileSystem: {
@@ -106,9 +361,10 @@
                         upper: { type: "indexedDB", name: "starsector_node_v1" }
                     },
                     // LOCAL MIRROR CONFIGURATION
-                    runtime: { version: "17", url: "/17/lib/modules" },
+                    runtime: { version: runtimeVersion, url: runtimeUrl },
                     javaProperties: [
-                        "java.version=17", "os.name=Linux",
+                        `java.version=${runtimeVersion}`, "os.name=Linux",
+                        "file.encoding=UTF-8",
                         "user.dir=/app", "user.home=/app/saves",
                         
                         // Native Path Fix
@@ -116,40 +372,111 @@
                         "org.lwjgl.librarypath=/app/native/linux:/app/native",
 
                         // Path Redirects
-                        "-Dcom.fs.starfarer.settings.paths.mods=/app/mods",
-                        "-Dcom.fs.starfarer.settings.paths.saves=/app/saves",
-                        "-Dcom.fs.starfarer.settings.paths.logs=/app/logs",
-                        "-Dfs.game.dir=/app",
+                        "com.fs.starfarer.settings.paths.mods=/app/mods",
+                        "com.fs.starfarer.settings.paths.saves=/app/saves",
+                        "com.fs.starfarer.settings.paths.screenshots=/app/screenshots",
+                        "com.fs.starfarer.settings.paths.logs=/app/logs",
+                        "fs.game.dir=/app",
+                        "com.fs.starfarer.settings.linux=true",
+                        "java.util.Arrays.useLegacyMergeSort=true",
+                        "log4j.configuration=file:/app/console_log4j.properties",
                         
                         "legacyLauncher=true", "log4j.debug=true", "java.awt.headless=false"
                     ],
-                    arguments: [
-                        "--add-opens=java.base/java.lang=ALL-UNNAMED",
-                        "--add-opens=java.base/java.util=ALL-UNNAMED",
-                        "--add-opens=java.base/java.nio=ALL-UNNAMED", 
-                        "--add-opens=java.desktop/java.awt=ALL-UNNAMED",
-                        "-Xmx1500m", "-Xms512m"
-                    ]
+                    arguments: baseArguments
                 });
+                console.info("Boot: cheerpjInit completed", { time: performance.now() });
+                logDuration("cheerpjInit duration", cheerpjInitStart);
 
                 cheerpjCreateDisplay(1280, 768);
+                console.info("Boot: display created", { width: 1280, height: 768, time: performance.now() });
+
+                const createDir = (path) => new Promise((resolve) => {
+                    const mkdir = window.cheerpOSCreateDir || window.cheerpjCreateDir;
+                    if (!mkdir) {
+                        resolve();
+                        return;
+                    }
+                    try {
+                        mkdir(path, {}, 0o755, () => resolve());
+                    } catch (e) {
+                        resolve();
+                    }
+                });
+
+                await createDir("/app/saves");
+                await createDir("/app/logs");
+                await createDir("/app/mods");
+                await createDir("/app/screenshots");
+                console.info("Boot: directories ensured", { time: performance.now() });
 
                 // C. Launch
-                ui.log.innerText = "Executing CombatMain...";
+                logPhase("Executing StarfarerLauncher...");
+                console.info("Boot: preparing classpath", { time: performance.now() });
                 
-                // Build Classpath dynamically from manifest (JARs only)
+                // Build classpath to match starsector.sh ordering.
                 const assets = await fetch('assets.json').then(r => r.json());
-                const classpath = assets
-                    .filter(f => f.endsWith('.jar'))
-                    .map(f => "/app/" + f)
-                    .join(":");
+                const classpathEntries = [
+                    "janino.jar",
+                    "commons-compiler.jar",
+                    "commons-compiler-jdk.jar",
+                    "starfarer.api.jar",
+                    "starfarer_obf.jar",
+                    "jogg-0.0.7.jar",
+                    "jorbis-0.0.15.jar",
+                    "json.jar",
+                    "lwjgl.jar",
+                    "jinput.jar",
+                    "log4j-1.2.9.jar",
+                    "lwjgl_util.jar",
+                    "fs.sound_obf.jar",
+                    "fs.common_obf.jar",
+                    "xstream-1.4.10.jar",
+                    "txw2-3.0.2.jar",
+                    "jaxb-api-2.4.0-b180830.0359.jar",
+                    "webp-imageio-0.1.6.jar"
+                ];
+                const missing = classpathEntries.filter((entry) => !assets.includes(entry));
+                if (missing.length) {
+                    console.warn("Missing classpath entries:", missing);
+                    ui.log.innerText = `Missing jars: ${missing.join(", ")}`;
+                }
+                if (debugBoot) {
+                    console.info("Boot: assets manifest", {
+                        totalAssets: assets.length,
+                        classpathEntries: classpathEntries.length,
+                        missingEntries: missing
+                    });
+                }
+                const classpath = classpathEntries.map((entry) => "/app/" + entry).join(":");
+                if (debugClasspath) {
+                    await probeClasspath(ROOT, classpathEntries);
+                }
 
                 // Auto-create log file to ensure write layer is active
                 const addFile = window.cheerpOSAddStringFile || window.cheerpjAddStringFile;
                 try { await addFile("/app/starsector.log", "Init"); } catch(e){}
 
                 document.getElementById('ui-layer').style.display = 'none';
-                await cheerpjRunMain("com.fs.starfarer.combat.CombatMain", classpath);
+                console.info("Boot: launching", { time: performance.now(), mainClass });
+                console.info("Boot: dumpAllThreads available", typeof window.dumpAllThreads);
+                [
+                    { delay: 0, label: "launcher started" },
+                    { delay: 5000, label: "launcher still running after 5s" },
+                    { delay: 20000, label: "launcher still running after 20s" },
+                    { delay: 60000, label: "launcher still running after 60s" }
+                ].forEach(({ delay, label }) => queueThreadDump(delay, label));
+                try {
+                    const runMainStart = performance.now();
+                    await cheerpjRunMain(mainClass, classpath);
+                    console.info("Boot: launcher exited", { time: performance.now() });
+                    logDuration("launcher run duration", runMainStart);
+                } finally {
+                    cancelThreadDumps();
+                    if (heartbeatHandle) {
+                        clearInterval(heartbeatHandle);
+                    }
+                }
 
             } catch (e) {
                 ui.log.innerText = "FATAL: " + e.message;
@@ -160,4 +487,3 @@
     </script>
 </body>
 </html>
-
